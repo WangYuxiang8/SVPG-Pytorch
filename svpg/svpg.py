@@ -1,12 +1,14 @@
 import math
 
+import torch
+import numpy as np
 import torch.optim as optim
 from torch.distributions.kl import kl_divergence
 
 from scipy.spatial.distance import squareform, pdist
 
-from common.svpg.particles import SVPGParticle
-from common.svpg.svpg_utils import *
+from svpg.particles import SVPGParticle
+from svpg.svpg_utils import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.set_default_tensor_type(torch.FloatTensor)

@@ -21,6 +21,7 @@ def init(module, weight_init, bias_init, gain=1):
     bias_init(module.bias.data)
     return module
 
+
 # Why use orthogonal init?
 orthogonal_init = lambda m: init(module=m,
                                  weight_init=nn.init.orthogonal_,
