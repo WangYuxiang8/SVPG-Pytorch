@@ -45,4 +45,5 @@ print("Difference between x and y is: {0}".format(diff_x_y2))
 
 
 # TODO: 目标是调用SVPG模块，生成样本与目标分布生成的样本越接近越好
+from svpg.svpg import SVPG
 
