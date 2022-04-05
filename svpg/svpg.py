@@ -167,8 +167,8 @@ class SVPG:
                 action = self._process_action(action)   # Normalize action
                 clipped_action = action * self.max_step_length
                 # The output of particle is a delta change to input. We just add clipped action to input params.
-                next_params = np.clip(current_sim_params + clipped_action, 0, 1)
-
+                #next_params = np.clip(current_sim_params + clipped_action, 0, 1)
+                next_params = current_sim_params + clipped_action
                 if np.array_equal(next_params, current_sim_params) or self.timesteps[i] + 1 == self.svpg_horizon:
                     next_params = np.random.uniform(0, 1, (self.nparams,))
 
@@ -183,6 +183,57 @@ class SVPG:
         return np.array(self.simulation_instances)
 
     def train(self, simulator_rewards):
+        policy_grads = []
+        parameters = []
+        loss = 0
+        for i in range(self.nagents):
+            policy_grad_particle = []
+            _, next_value = self.select_action(i, self.last_states[i])
+            particle_rewards = torch.from_numpy(simulator_rewards[i]).float().to(device)
+            masks = torch.from_numpy(self.masks[i]).float().to(device)
+            returns = self.compute_returns(next_value, particle_rewards, masks, self.particles[i].saved_klds)
+            returns = torch.cat(returns).detach()
+            #dummy = torch.ones(returns.shape)
+            advantages = returns - self.values[i]
+            for log_prob, advantage in zip(self.particles[i].saved_log_probs, advantages):
+                policy_grad_particle.append(log_prob * advantage.detach())
+                policy_grad_particle.append(log_prob * advantage)
+            self.optimizers[i].zero_grad()
+            critic_loss = 0.5 * advantages.pow(2).mean()
+            # retain_graph的作用是保留计算图中各个节点的值，能够再计算一遍backward
+            # 也就是下面policy_grad也会用到这个梯度，所以要保留一下
+            critic_loss.backward(retain_graph=True)
+            loss += critic_loss
+            self.optimizers[i].step()
+
+            self.optimizers[i].zero_grad()
+            policy_grad = -torch.cat(policy_grad_particle).mean()
+            policy_grad.backward(retain_graph=True)
+
+            vec_param, vec_policy_grad = parameters_to_vector(
+                self.particles[i].parameters(), both=True)
+
+            policy_grads.append(vec_policy_grad.unsqueeze(0))
+            parameters.append(vec_param.unsqueeze(0))
+
+        # print("Critic value: {1}, Critic loss: {0}".format(loss / self.nagents, self.values[0].detach().mean()))
+
+        parameters = torch.cat(parameters)
+        Kxx, dxKxx = self._Kxx_dxKxx(parameters)
+
+        policy_grads = 1 / self.temperature * torch.cat(policy_grads)
+        grad_logp = torch.mm(Kxx, policy_grads)
+
+        grad_theta = (grad_logp + dxKxx) / self.nagents
+        # explicitly deleting variables does not release memory :(
+
+        # update param gradients
+        for i in range(self.nagents):
+            vector_to_parameters(grad_theta[i],
+                                 self.particles[i].parameters(), grad=True)
+            self.optimizers[i].step()
+
+    def train1(self, simulator_rewards):
         """Train SVPG agent with rewards from rollouts
         """
         policy_grads = []
@@ -208,18 +259,20 @@ class SVPG:
             # logprob * A = policy gradient (before backwards)
             for log_prob, advantage in zip(self.particles[i].saved_log_probs, advantages):
                 policy_grad_particle.append(log_prob * advantage.detach())
-                # policy_grad_particle.append(log_prob * advantage)
+                policy_grad_particle.append(log_prob * advantage)
 
             # Compute value loss, update critic
             self.optimizers[i].zero_grad()
             critic_loss = 0.5 * advantages.pow(2).mean()
+            # retain_graph的作用是保留计算图中各个节点的值，能够再计算一遍backward
+            # 也就是下面policy_grad也会用到这个梯度，所以要保留一下
             critic_loss.backward(retain_graph=True)
             self.optimizers[i].step()
 
             # Store policy gradients for SVPG update
             self.optimizers[i].zero_grad()
             policy_grad = -torch.cat(policy_grad_particle).mean()
-            policy_grad.backward()
+            policy_grad.backward(retain_graph=True)
 
             # Vectorize parameters and PGs
             vec_param, vec_policy_grad = parameters_to_vector(

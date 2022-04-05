@@ -12,12 +12,12 @@ from torch.distributions.uniform import Uniform
 from torch.distributions.kl import kl_divergence
 from svpg.svpg import SVPG
 
-dimension = 5
+dimension = 1
 n = 100
 mean_vector = [np.float32(i * 0.2) for i in range(dimension)]
 
 target_distribution = MultivariateNormal(torch.tensor(mean_vector), torch.eye(dimension) * 0.1)
-uniform = Uniform(0, 0.2)
+uniform = Uniform(2, 3)
 
 # Get target distribution
 y = target_distribution.rsample((n,))
@@ -48,7 +48,7 @@ print("Difference between x and y is: {0}".format(diff_x_y2))
 
 # TODO: 目标是调用SVPG模块，生成样本与目标分布生成的样本越接近越好
 
-episode = 1
+episode = 200
 nagents = 10
 nparams = dimension
 max_step_length = 0.05
@@ -70,7 +70,8 @@ svpg_trainer = SVPG(
 )
 
 for i in range(episode):
-    y = target_distribution.rsample((nagents, svpg_rollout_length,))
+    # y = target_distribution.rsample((nagents, svpg_rollout_length,))
+    y = uniform.rsample((nagents, svpg_rollout_length, dimension))
     y = np.array(y)
     x = svpg_trainer.step()
     loss = []
@@ -82,6 +83,6 @@ for i in range(episode):
             tmp.append(diff)
         loss.append(tmp)
     loss = np.array(loss)
-    print(loss)
-    svpg_trainer.train(loss)
+    print(loss.mean())
+    svpg_trainer.train1(loss)
 
